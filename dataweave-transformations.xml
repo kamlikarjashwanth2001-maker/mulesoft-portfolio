@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- HTTP Listener Config -->
+    <http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config">
+        <http:listener-connection host="0.0.0.0" port="8081"/>
+    </http:listener-config>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 1: JSON to XML Transformation                           -->
+    <!-- ============================================================ -->
+    <flow name="json-to-xml-flow" doc:name="JSON to XML Flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/transform/json-to-xml" doc:name="HTTP Listener"/>
+
+        <ee:transform doc:name="JSON to XML Transform">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/xml
+---
+{
+    employees: {
+        (payload map (employee, index) -> {
+            employee @(id: employee.id): {
+                name: employee.name,
+                department: employee.department,
+                salary: employee.salary
+            }
+        })
+    }
+}
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 2: CSV to JSON Transformation                           -->
+    <!-- ============================================================ -->
+    <flow name="csv-to-json-flow" doc:name="CSV to JSON Flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/transform/csv-to-json" doc:name="HTTP Listener"/>
+
+        <ee:transform doc:name="Set CSV Input">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output text/csv
+---
+[
+    { name: "Alice", age: "28", city: "Hyderabad" },
+    { name: "Bob", age: "32", city: "Bangalore" },
+    { name: "Charlie", age: "25", city: "Chennai" }
+]
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <ee:transform doc:name="CSV to JSON">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+input payload text/csv
+output application/json
+---
+payload map (row) -> {
+    name: row.name,
+    age: row.age as Number,
+    city: row.city,
+    upperName: upper(row.name)
+}
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 3: Data Filtering & Mapping                             -->
+    <!-- ============================================================ -->
+    <flow name="data-filter-flow" doc:name="Data Filter and Map Flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/transform/filter" doc:name="HTTP Listener"/>
+
+        <ee:transform doc:name="Filter and Map Employees">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+var employees = [
+    { name: "Jashwanth", dept: "IT", salary: 75000, active: true },
+    { name: "Priya", dept: "HR", salary: 55000, active: false },
+    { name: "Rahul", dept: "IT", salary: 90000, active: true },
+    { name: "Sneha", dept: "Finance", salary: 65000, active: true }
+]
+---
+{
+    activeITEmployees: employees 
+        filter (e) -> e.active == true and e.dept == "IT"
+        map (e) -> {
+            employeeName: e.name,
+            annualSalary: e.salary,
+            monthlySalary: e.salary / 12,
+            department: e.dept
+        },
+    totalCount: sizeOf(employees filter (e) -> e.active == true and e.dept == "IT")
+}
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+</mule>

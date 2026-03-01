@@ -1,0 +1,244 @@
+#%RAML 1.0
+title: Employee Management API
+version: v1
+baseUri: http://localhost:8081/api/{version}
+mediaType: application/json
+
+documentation:
+  - title: Overview
+    content: |
+      ## Employee Management API
+      
+      This API provides full CRUD operations for managing employees.
+      Designed and built by **Kamlikar Jashwanth** as part of MuleSoft portfolio.
+      
+      ### Features
+      - Get all employees with optional filtering
+      - Get a single employee by ID
+      - Create a new employee
+      - Update an existing employee
+      - Delete an employee
+
+# ============================================================
+# DATA TYPES
+# ============================================================
+types:
+  Employee:
+    type: object
+    properties:
+      id:
+        type: integer
+        required: false
+        description: Auto-generated unique identifier
+      name:
+        type: string
+        required: true
+        minLength: 2
+        maxLength: 100
+        example: "Kamlikar Jashwanth"
+      department:
+        type: string
+        required: true
+        enum: [IT, HR, Finance, Marketing, Operations]
+        example: "IT"
+      email:
+        type: string
+        required: true
+        pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+        example: "jashwanth@company.com"
+      salary:
+        type: number
+        required: true
+        minimum: 10000
+        maximum: 500000
+        example: 75000
+      createdAt:
+        type: datetime
+        required: false
+        description: Auto-set on creation
+
+  SuccessResponse:
+    type: object
+    properties:
+      status:
+        type: string
+        enum: [success]
+      message:
+        type: string
+
+  ErrorResponse:
+    type: object
+    properties:
+      status:
+        type: string
+        enum: [error]
+      errorType:
+        type: string
+      message:
+        type: string
+      timestamp:
+        type: string
+
+# ============================================================
+# TRAITS (Reusable Behaviors)
+# ============================================================
+traits:
+  pageable:
+    queryParameters:
+      page:
+        type: integer
+        default: 1
+        description: Page number
+      pageSize:
+        type: integer
+        default: 10
+        maximum: 100
+        description: Number of records per page
+
+  searchable:
+    queryParameters:
+      department:
+        type: string
+        required: false
+        description: Filter by department
+      name:
+        type: string
+        required: false
+        description: Search by name (partial match)
+
+# ============================================================
+# RESOURCES & METHODS
+# ============================================================
+/employees:
+  description: Employee resource - manage all employees
+
+  get:
+    is: [pageable, searchable]
+    description: Retrieve a list of all employees with optional filters
+    responses:
+      200:
+        description: List of employees retrieved successfully
+        body:
+          application/json:
+            type: object
+            properties:
+              status: string
+              count: integer
+              data:
+                type: Employee[]
+            example: |
+              {
+                "status": "success",
+                "count": 2,
+                "data": [
+                  {
+                    "id": 1,
+                    "name": "Kamlikar Jashwanth",
+                    "department": "IT",
+                    "email": "jashwanth@company.com",
+                    "salary": 75000
+                  }
+                ]
+              }
+      500:
+        description: Internal server error
+        body:
+          application/json:
+            type: ErrorResponse
+
+  post:
+    description: Create a new employee record
+    body:
+      application/json:
+        type: Employee
+        example: |
+          {
+            "name": "Priya Sharma",
+            "department": "HR",
+            "email": "priya@company.com",
+            "salary": 55000
+          }
+    responses:
+      201:
+        description: Employee created successfully
+        body:
+          application/json:
+            type: object
+            properties:
+              status: string
+              message: string
+              generatedId: integer
+            example: |
+              {
+                "status": "success",
+                "message": "Employee created successfully",
+                "generatedId": 5
+              }
+      400:
+        description: Invalid input data
+        body:
+          application/json:
+            type: ErrorResponse
+
+  /{id}:
+    description: Operations on a specific employee by ID
+    uriParameters:
+      id:
+        type: integer
+        description: Unique employee identifier
+        minimum: 1
+
+    get:
+      description: Retrieve a single employee by ID
+      responses:
+        200:
+          description: Employee found
+          body:
+            application/json:
+              type: object
+              properties:
+                status: string
+                data: Employee
+        404:
+          description: Employee not found
+          body:
+            application/json:
+              type: ErrorResponse
+
+    put:
+      description: Update an existing employee
+      body:
+        application/json:
+          type: Employee
+          example: |
+            {
+              "name": "Jashwanth Updated",
+              "department": "IT",
+              "email": "jashwanth.new@company.com",
+              "salary": 85000
+            }
+      responses:
+        200:
+          description: Employee updated
+          body:
+            application/json:
+              type: SuccessResponse
+        404:
+          description: Employee not found
+          body:
+            application/json:
+              type: ErrorResponse
+
+    delete:
+      description: Delete an employee by ID
+      responses:
+        200:
+          description: Employee deleted successfully
+          body:
+            application/json:
+              type: SuccessResponse
+        404:
+          description: Employee not found
+          body:
+            application/json:
+              type: ErrorResponse

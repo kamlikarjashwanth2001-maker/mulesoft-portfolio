@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- HTTP Config -->
+    <http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config">
+        <http:listener-connection host="0.0.0.0" port="8083"/>
+    </http:listener-config>
+
+    <!-- External API config (for HTTP Request) -->
+    <http:request-config name="External_API_Config" doc:name="External API Config">
+        <http:request-connection host="api.example.com" port="443" protocol="HTTPS"/>
+    </http:request-config>
+
+    <!-- ============================================================ -->
+    <!-- GLOBAL ERROR HANDLER                                         -->
+    <!-- ============================================================ -->
+    <error-handler name="Global_Error_Handler" doc:name="Global Error Handler">
+
+        <!-- Handle Validation Errors -->
+        <on-error-continue enableNotifications="true" logException="true"
+            type="VALIDATION:INVALID_INPUT" doc:name="Validation Error">
+            <ee:transform doc:name="Validation Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status: "error",
+    errorType: "VALIDATION_ERROR",
+    message: error.description,
+    timestamp: now() as String { format: "yyyy-MM-dd HH:mm:ss" }
+}
+                    ]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus">400</ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="WARN" message='#["[VALIDATION ERROR] " ++ error.description]' doc:name="Log Validation Error"/>
+        </on-error-continue>
+
+        <!-- Handle HTTP Connectivity Errors -->
+        <on-error-continue enableNotifications="true" logException="true"
+            type="HTTP:CONNECTIVITY" doc:name="HTTP Connectivity Error">
+            <ee:transform doc:name="Connectivity Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status: "error",
+    errorType: "CONNECTIVITY_ERROR",
+    message: "External service is unavailable. Please try again later.",
+    timestamp: now() as String { format: "yyyy-MM-dd HH:mm:ss" }
+}
+                    ]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus">503</ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="ERROR" message='#["[CONNECTIVITY ERROR] " ++ error.description]' doc:name="Log Connectivity Error"/>
+        </on-error-continue>
+
+        <!-- Catch-All Error Handler -->
+        <on-error-continue enableNotifications="true" logException="true"
+            type="ANY" doc:name="Any Error">
+            <ee:transform doc:name="Generic Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status: "error",
+    errorType: error.errorType.identifier default "UNKNOWN",
+    message: error.description default "An unexpected error occurred",
+    timestamp: now() as String { format: "yyyy-MM-dd HH:mm:ss" }
+}
+                    ]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus">500</ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="ERROR" message='#["[UNEXPECTED ERROR] Type: " ++ error.errorType.identifier ++ " | Message: " ++ error.description]' doc:name="Log Unexpected Error"/>
+        </on-error-continue>
+
+    </error-handler>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 1: Input Validation with Try Scope                      -->
+    <!-- ============================================================ -->
+    <flow name="validate-input-flow" doc:name="Validate Input Flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/validate" allowedMethods="POST" doc:name="HTTP Listener"/>
+
+        <!-- Log Incoming Request -->
+        <logger level="INFO" message='#["[REQUEST] POST /validate | Body: " ++ write(payload, "application/json")]' doc:name="Log Incoming Request"/>
+
+        <try doc:name="Try - Validate Input">
+            <!-- Validate required fields exist -->
+            <choice doc:name="Required Fields Check">
+                <when expression="#[payload.name == null or payload.email == null]">
+                    <raise-error type="VALIDATION:INVALID_INPUT" description="Fields 'name' and 'email' are required" doc:name="Raise Validation Error"/>
+                </when>
+                <otherwise>
+                    <ee:transform doc:name="Success Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status: "success",
+    message: "Input is valid",
+    receivedData: payload,
+    processedAt: now() as String { format: "yyyy-MM-dd HH:mm:ss" }
+}
+                            ]]></ee:set-payload>
+                        </ee:message>
+                    </ee:transform>
+                    <logger level="INFO" message='#["[SUCCESS] Validation passed for: " ++ payload.name]' doc:name="Log Success"/>
+                </otherwise>
+            </choice>
+
+            <error-handler>
+                <on-error-continue type="VALIDATION:INVALID_INPUT" doc:name="Handle Validation Error">
+                    <ee:transform doc:name="Validation Error Response">
+                        <ee:message>
+                            <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status: "error",
+    errorType: "VALIDATION_ERROR",
+    message: error.description,
+    timestamp: now() as String { format: "yyyy-MM-dd HH:mm:ss" }
+}
+                            ]]></ee:set-payload>
+                        </ee:message>
+                        <ee:variables>
+                            <ee:set-variable variableName="httpStatus">400</ee:set-variable>
+                        </ee:variables>
+                    </ee:transform>
+                    <logger level="WARN" message='#["[WARN] Validation failed: " ++ error.description]' doc:name="Log Warning"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+
+        <http:listener doc:name="Set HTTP Status" statusCode="#[vars.httpStatus default 200]"/>
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 2: Structured Logging Demo                              -->
+    <!-- ============================================================ -->
+    <flow name="logging-demo-flow" doc:name="Logging Demo Flow">
+        <http:listener config-ref="HTTP_Listener_config" path="/logging-demo" doc:name="HTTP Listener"/>
+
+        <logger level="DEBUG" message="[DEBUG] Flow started - logging-demo-flow" doc:name="DEBUG Log"/>
+        <logger level="INFO"  message='#["[INFO] Processing request from: " ++ attributes.remoteAddress]' doc:name="INFO Log"/>
+        <logger level="WARN"  message="[WARN] This is a sample warning log" doc:name="WARN Log"/>
+
+        <ee:transform doc:name="Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    message: "Check your Anypoint Studio console for log output!",
+    logLevels: ["DEBUG", "INFO", "WARN", "ERROR"],
+    tip: "In production, use log4j2.xml to configure log levels"
+}
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+</mule>

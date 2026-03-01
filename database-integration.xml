@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- HTTP Listener Config -->
+    <http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config">
+        <http:listener-connection host="0.0.0.0" port="8082"/>
+    </http:listener-config>
+
+    <!-- MySQL Database Config -->
+    <db:config name="MySQL_Config" doc:name="Database Config">
+        <db:my-sql-connection
+            host="${db.host}"
+            port="${db.port}"
+            user="${db.user}"
+            password="${db.password}"
+            database="${db.name}"/>
+    </db:config>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 1: GET All Employees                                     -->
+    <!-- ============================================================ -->
+    <flow name="get-all-employees-flow" doc:name="Get All Employees">
+        <http:listener config-ref="HTTP_Listener_config" path="/employees" allowedMethods="GET" doc:name="GET /employees"/>
+
+        <db:select config-ref="MySQL_Config" doc:name="Select All Employees">
+            <db:sql><![CDATA[SELECT id, name, department, email, salary FROM employees ORDER BY id]]></db:sql>
+        </db:select>
+
+        <ee:transform doc:name="Format Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status: "success",
+    count: sizeOf(payload),
+    data: payload map (emp) -> {
+        id: emp.id,
+        name: emp.name,
+        department: emp.department,
+        email: emp.email,
+        salary: emp.salary
+    }
+}
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 2: GET Employee by ID                                    -->
+    <!-- ============================================================ -->
+    <flow name="get-employee-by-id-flow" doc:name="Get Employee by ID">
+        <http:listener config-ref="HTTP_Listener_config" path="/employees/{id}" allowedMethods="GET" doc:name="GET /employees/{id}"/>
+
+        <db:select config-ref="MySQL_Config" doc:name="Select Employee by ID">
+            <db:sql><![CDATA[SELECT id, name, department, email, salary FROM employees WHERE id = :id]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ id: attributes.uriParams.id as Number }]]]></db:input-parameters>
+        </db:select>
+
+        <choice doc:name="Employee Found?">
+            <when expression="#[sizeOf(payload) > 0]">
+                <ee:transform doc:name="Return Employee">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status: "success",
+    data: payload[0]
+}
+                        ]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </when>
+            <otherwise>
+                <ee:transform doc:name="Employee Not Found">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{ status: "error", message: "Employee not found" }
+                        ]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </otherwise>
+        </choice>
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 3: POST - Create Employee                                -->
+    <!-- ============================================================ -->
+    <flow name="create-employee-flow" doc:name="Create Employee">
+        <http:listener config-ref="HTTP_Listener_config" path="/employees" allowedMethods="POST" doc:name="POST /employees"/>
+
+        <db:insert config-ref="MySQL_Config" doc:name="Insert Employee">
+            <db:sql><![CDATA[
+                INSERT INTO employees (name, department, email, salary)
+                VALUES (:name, :department, :email, :salary)
+            ]]></db:sql>
+            <db:input-parameters><![CDATA[
+                #[{
+                    name: payload.name,
+                    department: payload.department,
+                    email: payload.email,
+                    salary: payload.salary
+                }]
+            ]]></db:input-parameters>
+        </db:insert>
+
+        <ee:transform doc:name="Create Success Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+    status: "success",
+    message: "Employee created successfully",
+    generatedId: payload.generatedKeys.GENERATED_KEY
+}
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- ============================================================ -->
+    <!-- FLOW 4: DELETE Employee                                       -->
+    <!-- ============================================================ -->
+    <flow name="delete-employee-flow" doc:name="Delete Employee">
+        <http:listener config-ref="HTTP_Listener_config" path="/employees/{id}" allowedMethods="DELETE" doc:name="DELETE /employees/{id}"/>
+
+        <db:delete config-ref="MySQL_Config" doc:name="Delete Employee">
+            <db:sql><![CDATA[DELETE FROM employees WHERE id = :id]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ id: attributes.uriParams.id as Number }]]]></db:input-parameters>
+        </db:delete>
+
+        <ee:transform doc:name="Delete Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{ status: "success", message: "Employee deleted", affectedRows: payload }
+                ]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+</mule>
